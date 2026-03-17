@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sticker Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Color+Emoji&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Nav -->
+        <nav class="nav">
+            <div class="nav-brand">
+                <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                <span class="nav-title">Sticker Generator</span>
+            </div>
+            <!-- Mode Switcher -->
+            <div class="mode-switcher">
+                <button class="mode-btn active" data-mode="image" title="Image sticker">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    Image
+                </button>
+                <button class="mode-btn" data-mode="emoji" title="Emoji / text sticker">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                    Emoji
+                </button>
+            </div>
+            <div class="nav-actions">
+                <a href="https://www.remove.bg/api#remove-background" target="_blank" rel="noopener" class="nav-link">
+                    Docs <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3.5 2.5h6m0 0v6m0-6L2.5 9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </a>
+            </div>
+        </nav>
+
+        <!-- ===== IMAGE MODE ===== -->
+        <div class="workspace" id="imageWorkspace">
+            <!-- Loading: scoped to workspace only -->
+            <div id="loadingOverlay" class="loading-overlay hidden">
+                <div class="loading-content">
+                    <div class="loading-spinner"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" stroke-dasharray="50 14" stroke-linecap="round"/></svg></div>
+                    <p id="loadingText" class="loading-label">Processing...</p>
+                    <div class="loading-track"><div id="loadingBar" class="loading-bar"></div></div>
+                </div>
+            </div>
+
+            <!-- Upload Zone -->
+            <div id="uploadZone" class="upload-zone">
+                <div class="upload-inner">
+                    <div class="upload-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    </div>
+                    <h2 class="upload-title">Drop your image here</h2>
+                    <p class="upload-hint">or click to browse · paste with <kbd>Ctrl+V</kbd></p>
+                    <p class="upload-meta">PNG, JPG, WEBP — Max 25 MB</p>
+                </div>
+                <input type="file" id="fileInput" accept="image/*" hidden>
+            </div>
+
+            <!-- Result Area -->
+            <div id="resultArea" class="result-area hidden">
+                <div class="preview-frame">
+                    <div class="preview-canvas checkerboard" id="previewContainer">
+                        <canvas id="previewCanvas"></canvas>
+                        <span class="preview-badge" id="previewLabel">Sticker</span>
+                    </div>
+                    <button class="compare-btn" id="compareBtn" title="Hold to see original (or hold Space)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        Hold to compare
+                    </button>
+                </div>
+                <!-- Pipeline -->
+                <div class="pipeline">
+                    <div class="pipe-step" id="step1"><div class="pipe-dot"></div><span>Remove BG</span></div>
+                    <div class="pipe-line"></div>
+                    <div class="pipe-step" id="step2"><div class="pipe-dot"></div><span>Silhouette</span></div>
+                    <div class="pipe-line"></div>
+                    <div class="pipe-step" id="step3"><div class="pipe-dot"></div><span>Stroke</span></div>
+                </div>
+                <!-- Actions -->
+                <div class="actions">
+                    <button class="btn btn-ghost" id="resetBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 105.64-12.36L1 10"/></svg> New Image</button>
+                    <button class="btn btn-default" id="downloadBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> PNG</button>
+                    <button class="btn btn-default" id="downloadSvgBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> SVG</button>
+                    <button class="btn btn-primary" id="copyBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== EMOJI MODE ===== -->
+        <div class="workspace" id="emojiWorkspace" style="display:none">
+            <div class="emoji-studio">
+                <div class="emoji-preview-frame">
+                    <div class="preview-canvas checkerboard" id="emojiPreviewContainer">
+                        <canvas id="emojiPreviewCanvas"></canvas>
+                    </div>
+                </div>
+                <div class="emoji-input-area">
+                    <label class="emoji-label">Type emoji or text</label>
+                    <input type="text" id="emojiInput" class="emoji-input" value="🔥" placeholder="🎉 or any text..." spellcheck="false" autocomplete="off" maxlength="10">
+                    <div class="emoji-quick-picks">
+                        <button class="emoji-pick" data-emoji="🔥">🔥</button>
+                        <button class="emoji-pick" data-emoji="❤️">❤️</button>
+                        <button class="emoji-pick" data-emoji="⭐">⭐</button>
+                        <button class="emoji-pick" data-emoji="😎">😎</button>
+                        <button class="emoji-pick" data-emoji="🚀">🚀</button>
+                        <button class="emoji-pick" data-emoji="💯">💯</button>
+                        <button class="emoji-pick" data-emoji="👍">👍</button>
+                        <button class="emoji-pick" data-emoji="🎉">🎉</button>
+                        <button class="emoji-pick" data-emoji="💀">💀</button>
+                        <button class="emoji-pick" data-emoji="✨">✨</button>
+                        <button class="emoji-pick" data-emoji="OK">OK</button>
+                        <button class="emoji-pick" data-emoji="GG">GG</button>
+                    </div>
+                </div>
+                <div class="emoji-actions">
+                    <button class="btn btn-default" id="emojiDownloadBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> PNG</button>
+                    <button class="btn btn-primary" id="emojiCopyBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== SIDEBAR ===== -->
+        <aside id="settingsPanel" class="sidebar">
+            <!-- API Key -->
+            <section class="sb-section" id="apiKeySection">
+                <div class="sb-section-head">
+                    <h3>API Key</h3>
+                    <a href="https://www.remove.bg/api#remove-background" target="_blank" rel="noopener" class="sb-link">Get key <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M3.5 2.5h6m0 0v6m0-6L2.5 9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+                </div>
+                <div class="api-input-wrap" id="apiKeyWrap">
+                    <input type="password" id="apiKeyInput" class="api-input" placeholder="rm-bg_xxxxxxxxxxxx" spellcheck="false" autocomplete="off">
+                    <button class="api-toggle" id="apiKeyToggle" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                </div>
+                <p class="sb-hint" id="apiKeyStatus">Required for background removal</p>
+            </section>
+
+            <!-- Preview Background -->
+            <section class="sb-section">
+                <h3>Preview</h3>
+                <div class="control">
+                    <label>Background</label>
+                    <div class="seg-row bg-seg-row">
+                        <button class="seg-bg active" data-bg="checker" title="Checkerboard">
+                            <svg width="14" height="14" viewBox="0 0 16 16"><rect width="8" height="8" fill="#555"/><rect x="8" y="8" width="8" height="8" fill="#555"/><rect x="8" width="8" height="8" fill="#333"/><rect y="8" width="8" height="8" fill="#333"/></svg>
+                        </button>
+                        <button class="seg-bg" data-bg="white" title="White">
+                            <span class="bg-dot bg-dot-white"></span>
+                        </button>
+                        <button class="seg-bg" data-bg="dark" title="Dark">
+                            <span class="bg-dot bg-dot-dark"></span>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Stroke -->
+            <section class="sb-section">
+                <h3>Stroke</h3>
+                <div class="control">
+                    <label>Width</label>
+                    <div class="range-row">
+                        <input type="range" id="strokeWidth" min="0" max="40" value="8">
+                        <span class="range-val" id="strokeWidthVal">8px</span>
+                    </div>
+                </div>
+                <div class="control">
+                    <label>Color</label>
+                    <div class="color-picker-row">
+                        <div class="color-presets">
+                            <button class="color-dot active" data-color="#FFFFFF" style="--dot-color:#FFFFFF" title="White"></button>
+                            <button class="color-dot" data-color="#000000" style="--dot-color:#000000" title="Black"></button>
+                            <button class="color-dot" data-color="#FF3B30" style="--dot-color:#FF3B30" title="Red"></button>
+                            <button class="color-dot" data-color="#5E5CE6" style="--dot-color:#5E5CE6" title="Indigo"></button>
+                        </div>
+                        <div class="color-custom-wrap">
+                            <input type="color" id="customColor" value="#FFFFFF" class="color-custom-input">
+                            <span class="color-custom-label" id="colorHexLabel">#FFFFFF</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="control">
+                    <label>Style</label>
+                    <div class="seg-row">
+                        <button class="seg active" data-style="solid">Solid</button>
+                        <button class="seg" data-style="dashed">Dash</button>
+                        <button class="seg" data-style="dotted">Dot</button>
+                    </div>
+                </div>
+                <div class="control">
+                    <label>Join</label>
+                    <div class="seg-row">
+                        <button class="seg-join active" data-join="round">Round</button>
+                        <button class="seg-join" data-join="miter">Miter</button>
+                        <button class="seg-join" data-join="bevel">Bevel</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sticker Effect (iOS-style) -->
+            <section class="sb-section">
+                <h3>Sticker Effect</h3>
+                <div class="effect-grid">
+                    <button class="effect-card active" data-effect="none">
+                        <span class="effect-icon">○</span>
+                        <span class="effect-name">Original</span>
+                    </button>
+                    <button class="effect-card" data-effect="puffy">
+                        <span class="effect-icon effect-icon-puffy">◉</span>
+                        <span class="effect-name">Puffy</span>
+                    </button>
+                    <button class="effect-card" data-effect="shiny">
+                        <span class="effect-icon effect-icon-shiny">✦</span>
+                        <span class="effect-name">Shiny</span>
+                    </button>
+                    <button class="effect-card" data-effect="comic">
+                        <span class="effect-icon effect-icon-comic">▤</span>
+                        <span class="effect-name">Comic</span>
+                    </button>
+                </div>
+                <!-- Shiny sub-controls -->
+                <div class="effect-sub-controls" id="shinyControls">
+                    <div class="control">
+                        <label>Holo Angle</label>
+                        <div class="range-row">
+                            <input type="range" id="shinyAngle" min="0" max="360" value="135">
+                            <span class="range-val" id="shinyAngleVal">135°</span>
+                        </div>
+                    </div>
+                    <div class="control">
+                        <label>Intensity</label>
+                        <div class="range-row">
+                            <input type="range" id="shinyIntensity" min="10" max="100" value="60">
+                            <span class="range-val" id="shinyIntensityVal">60%</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Puffy sub-controls -->
+                <div class="effect-sub-controls" id="puffyControls">
+                    <div class="control">
+                        <label>Depth</label>
+                        <div class="range-row">
+                            <input type="range" id="puffyDepth" min="1" max="10" value="4">
+                            <span class="range-val" id="puffyDepthVal">4</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Effects -->
+            <section class="sb-section">
+                <h3>Shadow</h3>
+                <div class="control">
+                    <div class="fx-head">
+                        <span>Drop Shadow</span>
+                        <label class="toggle"><input type="checkbox" id="enableShadow"><span class="toggle-track"><span class="toggle-knob"></span></span></label>
+                    </div>
+                </div>
+                <div class="shadow-controls" id="shadowControls">
+                    <div class="control"><label>Offset X</label><div class="range-row"><input type="range" id="shadowX" min="-20" max="20" value="3"><span class="range-val" id="shadowXVal">3px</span></div></div>
+                    <div class="control"><label>Offset Y</label><div class="range-row"><input type="range" id="shadowY" min="-20" max="20" value="3"><span class="range-val" id="shadowYVal">3px</span></div></div>
+                    <div class="control"><label>Blur</label><div class="range-row"><input type="range" id="shadowBlur" min="0" max="30" value="6"><span class="range-val" id="shadowBlurVal">6px</span></div></div>
+                    <div class="control"><label>Opacity</label><div class="range-row"><input type="range" id="shadowOpacity" min="0" max="100" value="40" step="5"><span class="range-val" id="shadowOpacityVal">40%</span></div></div>
+                    <div class="control"><label>Color</label><input type="color" id="shadowColor" value="#000000" class="color-well"></div>
+                </div>
+            </section>
+
+            <!-- Output -->
+            <section class="sb-section">
+                <h3>Output</h3>
+                <div class="control">
+                    <label>Padding</label>
+                    <div class="range-row">
+                        <input type="range" id="outputPadding" min="0" max="60" value="20" step="2">
+                        <span class="range-val" id="outputPaddingVal">20px</span>
+                    </div>
+                </div>
+                <!-- Emoji font size (only visible in emoji mode) -->
+                <div class="control emoji-only-control hidden" id="emojiFontSizeControl">
+                    <label>Font Size</label>
+                    <div class="range-row">
+                        <input type="range" id="emojiFontSize" min="64" max="512" value="256" step="16">
+                        <span class="range-val" id="emojiFontSizeVal">256</span>
+                    </div>
+                </div>
+            </section>
+        </aside>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+    <script defer src="app.js"></script>
+</body>
+</html>
