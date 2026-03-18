@@ -33,6 +33,7 @@ const state = {
     comparing: false,
     processing: false,
     apiKey: localStorage.getItem('removebg_api_key') || '',
+    creditInfo: null,
 };
 
 const $ = s => document.querySelector(s);
@@ -69,6 +70,10 @@ document.addEventListener('DOMContentLoaded', () => {
     els.shinyControls = $('#shinyControls');
     els.puffyControls = $('#puffyControls');
     els.colorHexLabel = $('#colorHexLabel');
+    els.creditBar = $('#creditBar');
+    els.creditCount = $('#creditCount');
+    els.creditFill = $('#creditFill');
+    els.creditDetail = $('#creditDetail');
 
     // Emoji mode
     els.emojiInput = $('#emojiInput');
@@ -95,6 +100,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateShadowUI();
     updateEffectSubControls();
     updateColorHexLabel(state.settings.strokeColor);
+
+    // Fetch credits on load
+    if (state.apiKey) setTimeout(fetchCredits, 500);
 
     // Initial emoji render
     renderEmoji();
@@ -172,15 +180,19 @@ function updateEffectSubControls() {
 
 // ============= API Key =============
 function bindApiKey() {
+    let _creditDebounce;
     els.apiKeyInput.addEventListener('input', e => {
         const key = e.target.value.trim();
         state.apiKey = key;
         if (key) {
             localStorage.setItem('removebg_api_key', key);
             updateApiKeyStatus(true);
+            clearTimeout(_creditDebounce);
+            _creditDebounce = setTimeout(fetchCredits, 600);
         } else {
             localStorage.removeItem('removebg_api_key');
             updateApiKeyStatus(false);
+            if (els.creditBar) els.creditBar.classList.add('hidden');
         }
     });
     els.apiKeyToggle.addEventListener('click', () => {
@@ -361,6 +373,10 @@ async function removeBgApi(file) {
         if (response.status === 429) throw new Error('rate limit — 429');
         throw new Error(`Remove.bg error (${response.status}): ${msg}`);
     }
+    // Track credits charged from response header
+    const charged = parseFloat(response.headers.get('X-Credits-Charged') || '1');
+    decrementCredits(charged);
+
     updateProgress(65);
     showLoading('Processing result…');
     return await response.blob();
@@ -695,52 +711,89 @@ function renderEmoji() {
     const sw = s.strokeWidth;
     const pad = s.outputPadding + sw;
 
-    // Measure text
+    // Measure text with generous safety margin
     const measure = document.createElement('canvas');
+    measure.width = fontSize * 8;
+    measure.height = fontSize * 2;
     const mCtx = measure.getContext('2d');
-    mCtx.font = `${fontSize}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-    const tm = mCtx.measureText(text);
-    const textW = Math.ceil(tm.width);
-    const textH = Math.ceil(fontSize * 1.15);
+    const emojiFont = `${fontSize}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    mCtx.font = emojiFont;
+    mCtx.textBaseline = 'middle';
 
+    // Render emoji on oversized canvas to find true bounding box via alpha scan
+    mCtx.fillText(text, fontSize * 0.5, fontSize);
+
+    // Scan for actual bounding box
+    const fullData = mCtx.getImageData(0, 0, measure.width, measure.height);
+    let minX = measure.width, minY = measure.height, maxX = 0, maxY = 0;
+    let hasPixels = false;
+    for (let y = 0; y < measure.height; y++) {
+        for (let x = 0; x < measure.width; x++) {
+            if (fullData.data[(y * measure.width + x) * 4 + 3] > 10) {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+                hasPixels = true;
+            }
+        }
+    }
+
+    if (!hasPixels) {
+        // Fallback: no visible pixels — possibly no emoji font. Just render centered text.
+        minX = 0; minY = 0;
+        maxX = Math.max(10, Math.ceil(mCtx.measureText(text).width));
+        maxY = Math.ceil(fontSize * 1.2);
+    }
+
+    const textW = maxX - minX + 1;
+    const textH = maxY - minY + 1;
+
+    // Step 1: Crop the emoji into a tight canvas
+    const textCanvas = document.createElement('canvas');
+    textCanvas.width = textW;
+    textCanvas.height = textH;
+    const tCtx = textCanvas.getContext('2d');
+    tCtx.drawImage(measure, minX, minY, textW, textH, 0, 0, textW, textH);
+
+    // Step 2: Build sticker with dilation stroke
     const outW = textW + pad * 2;
     const outH = textH + pad * 2;
 
-    // Build output
-    const output = document.createElement('canvas');
-    output.width = outW; output.height = outH;
-    const ctx = output.getContext('2d');
-
-    // Stroke + text on temp
     const stickerTemp = document.createElement('canvas');
-    stickerTemp.width = outW; stickerTemp.height = outH;
+    stickerTemp.width = outW;
+    stickerTemp.height = outH;
     const sCtx = stickerTemp.getContext('2d');
 
     if (sw > 0) {
-        sCtx.font = mCtx.font;
-        sCtx.textBaseline = 'top';
-        sCtx.lineWidth = sw * 2;
-        sCtx.lineJoin = s.strokeJoin;
-        sCtx.strokeStyle = s.strokeColor;
-        sCtx.strokeText(text, pad, pad + fontSize * 0.05);
+        const silhouette = createSilhouette(textCanvas, s.strokeColor);
+        drawDilatedStroke(sCtx, silhouette, pad, sw);
     }
-    sCtx.font = mCtx.font;
-    sCtx.textBaseline = 'top';
-    sCtx.fillText(text, pad, pad + fontSize * 0.05);
+
+    // Draw original emoji on top
+    sCtx.drawImage(textCanvas, pad, pad);
 
     // Apply sticker effect
     applyStickerEffect(stickerTemp);
 
-    // Shadow on composite
+    // Step 3: Final output with shadow
+    const output = document.createElement('canvas');
+    output.width = outW;
+    output.height = outH;
+    const ctx = output.getContext('2d');
+
     if (s.enableShadow) {
         const [r, g, b] = hexToRgb(s.shadowColor);
-        ctx.shadowOffsetX = s.shadowX; ctx.shadowOffsetY = s.shadowY;
+        ctx.shadowOffsetX = s.shadowX;
+        ctx.shadowOffsetY = s.shadowY;
         ctx.shadowBlur = s.shadowBlur;
         ctx.shadowColor = `rgba(${r},${g},${b},${s.shadowOpacity / 100})`;
     }
     ctx.drawImage(stickerTemp, 0, 0);
-    ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
-    ctx.shadowBlur = 0; ctx.shadowColor = 'transparent';
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
 
     state.emojiCanvas = output;
 
@@ -935,6 +988,93 @@ function blobToImage(blob) {
         img.onerror = reject;
         img.src = URL.createObjectURL(blob);
     });
+}
+
+
+// ============= Credit Counter =============
+async function fetchCredits() {
+    if (!state.apiKey || !els.creditBar) return;
+
+    els.creditBar.classList.remove('hidden');
+    els.creditBar.classList.add('refreshing');
+
+    try {
+        const res = await fetch('https://api.remove.bg/v1.0/account', {
+            headers: { 'X-Api-Key': state.apiKey }
+        });
+        if (!res.ok) {
+            if (res.status === 401 || res.status === 403) {
+                els.creditCount.textContent = 'Invalid key';
+                els.creditFill.style.width = '0%';
+                els.creditFill.className = 'credit-fill';
+                els.creditDetail.textContent = '';
+            }
+            els.creditBar.classList.remove('refreshing');
+            return;
+        }
+        const json = await res.json();
+        const attr = json?.data?.attributes;
+        if (!attr) { els.creditBar.classList.remove('refreshing'); return; }
+
+        const freeCalls = attr.api?.free_calls ?? 0;
+        const totalCredits = attr.credits?.total ?? 0;
+        const subCredits = attr.credits?.subscription ?? 0;
+        const paygCredits = attr.credits?.payg ?? 0;
+
+        state.creditInfo = { freeCalls, totalCredits, subCredits, paygCredits };
+        renderCredits();
+    } catch (e) {
+        console.warn('Failed to fetch credits:', e);
+    } finally {
+        els.creditBar.classList.remove('refreshing');
+    }
+}
+
+function renderCredits() {
+    const info = state.creditInfo;
+    if (!info || !els.creditBar) return;
+
+    els.creditBar.classList.remove('hidden');
+
+    // Display free calls primarily
+    const free = info.freeCalls;
+    const total = info.totalCredits;
+
+    if (free > 0) {
+        els.creditCount.textContent = `${free} / 50`;
+        const pct = (free / 50) * 100;
+        els.creditFill.style.width = pct + '%';
+        els.creditFill.className = 'credit-fill ' + (pct > 50 ? 'high' : pct > 20 ? 'mid' : 'low');
+    } else if (total > 0) {
+        els.creditCount.textContent = `${total} credits`;
+        const pct = Math.min(100, (total / Math.max(total, 50)) * 100);
+        els.creditFill.style.width = pct + '%';
+        els.creditFill.className = 'credit-fill ' + (pct > 50 ? 'high' : pct > 20 ? 'mid' : 'low');
+    } else {
+        els.creditCount.textContent = '0 remaining';
+        els.creditFill.style.width = '0%';
+        els.creditFill.className = 'credit-fill low';
+    }
+
+    // Detail line
+    const parts = [];
+    if (free > 0) parts.push(`<span>${free}</span> free`);
+    if (info.subCredits > 0) parts.push(`<span>${info.subCredits}</span> sub`);
+    if (info.paygCredits > 0) parts.push(`<span>${info.paygCredits}</span> payg`);
+    if (total > 0 && free <= 0) parts.push(`<span>${total}</span> total`);
+    els.creditDetail.innerHTML = parts.join(' \u00b7 ');
+}
+
+function decrementCredits(creditsCharged) {
+    if (!state.creditInfo || !els.creditBar) return;
+    const info = state.creditInfo;
+
+    if (info.freeCalls > 0) {
+        info.freeCalls = Math.max(0, info.freeCalls - 1);
+    } else {
+        info.totalCredits = Math.max(0, info.totalCredits - (creditsCharged || 1));
+    }
+    renderCredits();
 }
 
 function hexToRgb(hex) {
