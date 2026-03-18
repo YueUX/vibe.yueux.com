@@ -582,3 +582,15 @@ input[type="range"]{-webkit-appearance:none;appearance:none;background:none}
 }
 .credit-detail span{color:var(--c-text-2);font-weight:500}
 .credit-bar.refreshing{opacity:0.5}
+
+/* Low Credit Modal */
+.lcm-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);z-index:9999;display:flex;align-items:center;justify-content:center;animation:lcmFadeIn .2s ease}
+@keyframes lcmFadeIn{from{opacity:0}to{opacity:1}}
+.lcm-card{background:var(--c-surface,#111015);border:1px solid var(--c-border,#222);border-radius:16px;padding:32px 28px;max-width:380px;width:90%;text-align:center;box-shadow:0 24px 48px rgba(0,0,0,0.4)}
+.lcm-icon{font-size:48px;margin-bottom:12px}
+.lcm-title{color:var(--c-text,#eee);font-size:18px;font-weight:600;margin:0 0 12px}
+.lcm-body{color:var(--c-text-2,#aaa);font-size:14px;line-height:1.6;margin:0 0 8px}
+.lcm-body strong{color:var(--c-red,#FF6B6B);font-weight:700;font-size:18px}
+.lcm-hint{color:var(--c-text-3,#666);font-size:12px;margin:0 0 20px}
+.lcm-btn{background:var(--c-accent,#5E5CE6);color:#fff;border:none;border-radius:8px;padding:10px 32px;font-size:14px;font-weight:500;cursor:pointer;transition:opacity .15s}
+.lcm-btn:hover{opacity:0.85}

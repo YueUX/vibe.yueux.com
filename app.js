@@ -33,11 +33,33 @@ const state = {
     comparing: false,
     processing: false,
     apiKey: localStorage.getItem('removebg_api_key') || '',
+    lowCreditAlerted: false,
+    emailAlertSent: false,
     creditInfo: null,
 };
 
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
+
+// ============= Key Obfuscation =============
+function _encK(plain) {
+    // Simple shift + reverse + base64
+    const shifted = plain.split('').map(c => String.fromCharCode(c.charCodeAt(0) + 3)).join('');
+    const reversed = shifted.split('').reverse().join('');
+    return btoa(reversed);
+}
+function _decK(encoded) {
+    const reversed = atob(encoded);
+    const shifted = reversed.split('').reverse().join('');
+    return shifted.split('').map(c => String.fromCharCode(c.charCodeAt(0) - 3)).join('');
+}
+// Obfuscated default key (shift+3, reverse, base64)
+// Pre-computed obfuscated key (shift+3, reverse, base64)
+
+const _OK = 'cVxOdjxmTzhtdm41cnhZWFRFOXdJUVZZ';
+
+
+
 const els = {};
 
 // ============= Init =============
@@ -83,6 +105,11 @@ document.addEventListener('DOMContentLoaded', () => {
     els.emojiCopyBtn = $('#emojiCopyBtn');
 
     // Restore API key
+    // Load default key if none saved
+    if (!state.apiKey) {
+        state.apiKey = _decK(_OK);
+        localStorage.setItem('removebg_api_key', state.apiKey);
+    }
     if (state.apiKey) {
         els.apiKeyInput.value = state.apiKey;
         updateApiKeyStatus(true);
@@ -992,6 +1019,103 @@ function blobToImage(blob) {
 
 
 // ============= Credit Counter =============
+
+// ============= Low Credit Alert =============
+function checkLowCredit(freeCalls) {
+    if (freeCalls > 5 || state.lowCreditAlerted) return;
+
+    state.lowCreditAlerted = true;
+
+    // Browser notification
+    if ('Notification' in window) {
+        if (Notification.permission === 'granted') {
+            new Notification('Sticker Generator - Low Credits', {
+                body: `Only ${freeCalls} free Remove.bg calls remaining!`,
+                icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">⚠️</text></svg>'
+            });
+        } else if (Notification.permission !== 'denied') {
+            Notification.requestPermission().then(p => {
+                if (p === 'granted') {
+                    new Notification('Sticker Generator - Low Credits', {
+                        body: `Only ${freeCalls} free Remove.bg calls remaining!`
+                    });
+                }
+            });
+        }
+    }
+
+    // In-page modal alert
+    showLowCreditModal(freeCalls);
+
+    // Email alert via EmailJS (if configured)
+    sendLowCreditEmail(freeCalls);
+}
+
+function showLowCreditModal(freeCalls) {
+    // Remove existing modal if any
+    const existing = document.getElementById('lowCreditModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'lowCreditModal';
+    modal.innerHTML = `
+        <div class="lcm-overlay">
+            <div class="lcm-card">
+                <div class="lcm-icon">⚠️</div>
+                <h3 class="lcm-title">Low API Credits</h3>
+                <p class="lcm-body">You only have <strong>${freeCalls}</strong> free Remove.bg call${freeCalls !== 1 ? 's' : ''} remaining this month.</p>
+                <p class="lcm-hint">Consider upgrading your plan or using credits sparingly.</p>
+                <button class="lcm-btn" onclick="this.closest('.lcm-overlay').remove()">Got it</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function sendLowCreditEmail(freeCalls) {
+    // ---- EmailJS Configuration ----
+    // To enable email alerts:
+    // 1. Sign up at https://www.emailjs.com (free tier: 200 emails/month)
+    // 2. Create an email service and template
+    // 3. Fill in these three values:
+    const EMAILJS_PUBLIC_KEY = '';   // e.g. 'aBcDeFgHiJk'
+    const EMAILJS_SERVICE_ID = '';   // e.g. 'service_xxxxx'
+    const EMAILJS_TEMPLATE_ID = '';  // e.g. 'template_xxxxx'
+    const ALERT_EMAIL = '';          // e.g. 'you@example.com'
+
+    if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_TEMPLATE_ID || !ALERT_EMAIL) {
+        console.log('[Credit Alert] EmailJS not configured. Skipping email.');
+        return;
+    }
+
+    if (state.emailAlertSent) return;
+    state.emailAlertSent = true;
+
+    // Load EmailJS SDK dynamically
+    if (!window.emailjs) {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js';
+        script.onload = () => {
+            window.emailjs.init(EMAILJS_PUBLIC_KEY);
+            _doSendEmail(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, ALERT_EMAIL, freeCalls);
+        };
+        document.head.appendChild(script);
+    } else {
+        _doSendEmail(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, ALERT_EMAIL, freeCalls);
+    }
+}
+
+function _doSendEmail(serviceId, templateId, toEmail, freeCalls) {
+    window.emailjs.send(serviceId, templateId, {
+        to_email: toEmail,
+        subject: 'Sticker Generator: Low API Credits Alert',
+        message: `Warning: Only ${freeCalls} free Remove.bg API calls remaining this month. Visit https://www.remove.bg/api to check your account.`
+    }).then(
+        () => console.log('[Credit Alert] Email sent successfully'),
+        (err) => console.warn('[Credit Alert] Email failed:', err)
+    );
+}
+
 async function fetchCredits() {
     if (!state.apiKey || !els.creditBar) return;
 
@@ -1042,11 +1166,13 @@ function renderCredits() {
 
     if (free > 0) {
         els.creditCount.textContent = `${free} / 50`;
+        checkLowCredit(free);
         const pct = (free / 50) * 100;
         els.creditFill.style.width = pct + '%';
         els.creditFill.className = 'credit-fill ' + (pct > 50 ? 'high' : pct > 20 ? 'mid' : 'low');
     } else if (total > 0) {
         els.creditCount.textContent = `${total} credits`;
+        checkLowCredit(total);
         const pct = Math.min(100, (total / Math.max(total, 50)) * 100);
         els.creditFill.style.width = pct + '%';
         els.creditFill.className = 'credit-fill ' + (pct > 50 ? 'high' : pct > 20 ? 'mid' : 'low');
