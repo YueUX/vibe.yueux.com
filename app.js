@@ -36,6 +36,7 @@ const state = {
     lowCreditAlerted: false,
     emailAlertSent: false,
     creditInfo: null,
+    history: [], // [{originalImage, originalFile, bgRemovedCanvas, thumb}] max 5
 };
 
 const $ = s => document.querySelector(s);
@@ -88,6 +89,8 @@ document.addEventListener('DOMContentLoaded', () => {
     els.imageWorkspace = $('#imageWorkspace');
     els.emojiWorkspace = $('#emojiWorkspace');
     els.apiKeySection = $('#apiKeySection');
+    els.historyPanel = $('#historyPanel');
+    els.historyList = $('#historyList');
     els.emojiFontSizeControl = $('#emojiFontSizeControl');
     els.shinyControls = $('#shinyControls');
     els.puffyControls = $('#puffyControls');
@@ -130,6 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Fetch credits on load
     if (state.apiKey) setTimeout(fetchCredits, 500);
+    renderHistory();
 
     // Initial emoji render
     renderEmoji();
@@ -329,6 +333,116 @@ function bindCompare() {
     document.addEventListener('keyup', e => { if (e.code === 'Space' && state.comparing) showResult(); });
 }
 
+
+// ============= History Cache =============
+const MAX_HISTORY = 5;
+
+function pushHistory(originalImage, originalFile, bgRemovedCanvas) {
+    // Check if this image is already in history (by file name + size)
+    const key = originalFile ? (originalFile.name + '_' + originalFile.size) : Date.now().toString();
+    const exists = state.history.findIndex(h => h.key === key);
+    if (exists >= 0) {
+        // Move to front
+        const item = state.history.splice(exists, 1)[0];
+        item.bgRemovedCanvas = bgRemovedCanvas;
+        state.history.unshift(item);
+    } else {
+        // Create thumbnail
+        const thumb = document.createElement('canvas');
+        const thumbSize = 64;
+        const scale = Math.min(thumbSize / bgRemovedCanvas.width, thumbSize / bgRemovedCanvas.height);
+        thumb.width = Math.round(bgRemovedCanvas.width * scale);
+        thumb.height = Math.round(bgRemovedCanvas.height * scale);
+        thumb.getContext('2d').drawImage(bgRemovedCanvas, 0, 0, thumb.width, thumb.height);
+
+        state.history.unshift({
+            key,
+            originalImage,
+            originalFile,
+            bgRemovedCanvas,
+            thumbDataUrl: thumb.toDataURL('image/png'),
+            timestamp: Date.now()
+        });
+
+        // Trim to max
+        if (state.history.length > MAX_HISTORY) {
+            state.history.pop();
+        }
+    }
+    renderHistory();
+}
+
+function renderHistory() {
+    if (!els.historyList || !els.historyPanel) return;
+
+    if (state.history.length === 0) {
+        els.historyPanel.classList.add('hidden');
+        return;
+    }
+
+    els.historyPanel.classList.remove('hidden');
+    els.historyList.innerHTML = '';
+
+    state.history.forEach((item, idx) => {
+        const card = document.createElement('div');
+        card.className = 'history-card' + (item.bgRemovedCanvas === state.bgRemovedCanvas ? ' active' : '');
+        card.title = item.originalFile ? item.originalFile.name : 'Image ' + (idx + 1);
+
+        const img = document.createElement('img');
+        img.src = item.thumbDataUrl;
+        img.alt = 'History ' + (idx + 1);
+        card.appendChild(img);
+
+        // Time label
+        const label = document.createElement('span');
+        label.className = 'history-label';
+        const mins = Math.round((Date.now() - item.timestamp) / 60000);
+        label.textContent = mins < 1 ? 'Just now' : mins < 60 ? mins + 'm ago' : Math.round(mins / 60) + 'h ago';
+        card.appendChild(label);
+
+        // Close button
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'history-close';
+        closeBtn.innerHTML = '&times;';
+        closeBtn.title = 'Remove';
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.history.splice(idx, 1);
+            renderHistory();
+        });
+        card.appendChild(closeBtn);
+
+        // Click to restore
+        card.addEventListener('click', () => restoreHistory(idx));
+        els.historyList.appendChild(card);
+    });
+}
+
+function restoreHistory(idx) {
+    const item = state.history[idx];
+    if (!item) return;
+
+    state.originalImage = item.originalImage;
+    state.originalFile = item.originalFile;
+    state.bgRemovedCanvas = item.bgRemovedCanvas;
+
+    // Regenerate sticker with current settings (no API call!)
+    state.resultCanvas = generateSticker(state.bgRemovedCanvas);
+    renderPreview();
+    renderHistory(); // Update active state
+
+    // Show result area, hide upload
+    els.resultArea.classList.remove('hidden');
+    els.uploadZone.classList.add('hidden');
+
+    // Flash the active card briefly
+    const cards = els.historyList.querySelectorAll('.history-card');
+    if (cards[idx]) {
+        cards[idx].classList.add('flash');
+        setTimeout(() => cards[idx].classList.remove('flash'), 400);
+    }
+}
+
 // ============= Pipeline =============
 async function processImage() {
     if (!state.originalImage || state.processing) return;
@@ -345,6 +459,9 @@ async function processImage() {
         bgCanvas.height = bgImg.naturalHeight;
         bgCanvas.getContext('2d').drawImage(bgImg, 0, 0);
         state.bgRemovedCanvas = bgCanvas;
+
+        // Save to history cache (before generating sticker)
+        pushHistory(state.originalImage, state.originalFile, bgCanvas);
 
         setStep(1, 'completed'); updateProgress(70);
         showLoading('Generating sticker…'); setStep(2);
@@ -938,6 +1055,7 @@ function rerender() {
     rt = setTimeout(() => {
         if (state.mode === 'image' && state.bgRemovedCanvas) {
             state.resultCanvas = generateSticker(state.bgRemovedCanvas);
+            renderHistory();
             renderPreview();
         }
         if (state.mode === 'emoji') {
